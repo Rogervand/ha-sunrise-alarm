@@ -1,0 +1,22 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match manifest and card versions
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          MANIFEST=$(jq -r .version custom_components/sunrise_alarm/manifest.json)
+          CONST=$(grep -Po 'VERSION: Final = "\K[^"]+' custom_components/sunrise_alarm/const.py)
+          CARD=$(grep -Po 'CARD_VERSION = "\K[^"]+' custom_components/sunrise_alarm/frontend/sunrise-alarm-card.js)
+          echo "tag=$TAG manifest=$MANIFEST const=$CONST card=$CARD"
+          [ "$TAG" = "$MANIFEST" ] && [ "$TAG" = "$CONST" ] && [ "$TAG" = "$CARD" ]

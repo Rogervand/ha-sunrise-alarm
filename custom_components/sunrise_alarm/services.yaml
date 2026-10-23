@@ -1,0 +1,46 @@
+set_days:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: sunrise_alarm
+    days:
+      required: true
+      selector:
+        select:
+          multiple: true
+          translation_key: days
+          options: [mon, tue, wed, thu, fri, sat, sun]
+set_time:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: sunrise_alarm
+    time:
+      required: true
+      selector:
+        time:
+snooze:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: sunrise_alarm
+dismiss:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: sunrise_alarm
+trigger:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: sunrise_alarm
