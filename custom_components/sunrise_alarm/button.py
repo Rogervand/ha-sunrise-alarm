@@ -1,4 +1,4 @@
-"""Snooze, dismiss and test buttons."""
+"""Stop and test buttons."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import SunriseAlarmConfigEntry
-from .const import STATUS_IDLE, STATUS_RINGING
+from .const import STATUS_WAKING
 from .entity import SunriseAlarmEntity
 
 
@@ -19,42 +19,27 @@ async def async_setup_entry(
 ) -> None:
     """Set up buttons."""
     m = entry.runtime_data
-    async_add_entities(
-        [SnoozeButton(m, "snooze"), DismissButton(m, "dismiss"), TestButton(m, "test")]
-    )
+    async_add_entities([StopButton(m, "stop"), TestButton(m, "test")])
 
 
-class SnoozeButton(SunriseAlarmEntity, ButtonEntity):
-    """Snooze a ringing alarm."""
+class StopButton(SunriseAlarmEntity, ButtonEntity):
+    """Stop a wake-up in progress."""
 
     @property
     def available(self) -> bool:
-        """Only usable while ringing."""
-        return self.manager.status == STATUS_RINGING
+        """Only usable while waking."""
+        return self.manager.status == STATUS_WAKING
 
     async def async_press(self) -> None:
-        """Snooze."""
-        await self.manager.async_snooze()
-
-
-class DismissButton(SunriseAlarmEntity, ButtonEntity):
-    """Stop the alarm (or skip a fade that has started)."""
-
-    @property
-    def available(self) -> bool:
-        """Only usable while active."""
-        return self.manager.status != STATUS_IDLE
-
-    async def async_press(self) -> None:
-        """Dismiss."""
-        await self.manager.async_dismiss()
+        """Stop."""
+        await self.manager.async_stop()
 
 
 class TestButton(SunriseAlarmEntity, ButtonEntity):
-    """Ring now to test the wake actions."""
+    """Start the wake-up now."""
 
     _attr_entity_category = EntityCategory.CONFIG
 
     async def async_press(self) -> None:
-        """Ring now."""
-        self.manager.start_ringing()
+        """Start now."""
+        self.manager.start()

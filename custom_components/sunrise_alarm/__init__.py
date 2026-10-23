@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.components.frontend import add_extra_js_url
@@ -12,20 +13,34 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     ATTR_CONFIG_ENTRY_ID,
     ATTR_DAYS,
+    ATTR_ENABLED,
     ATTR_TIME,
+    BRIGHTNESS_MAX,
+    BRIGHTNESS_MIN,
     CARD_URL,
     CARD_URL_BASE,
     DOMAIN,
-    SERVICE_DISMISS,
-    SERVICE_SET_DAYS,
-    SERVICE_SET_TIME,
-    SERVICE_SNOOZE,
+    RAMP_MAX,
+    RAMP_MIN,
+    SERVICE_STOP,
     SERVICE_TRIGGER,
+    SERVICE_UPDATE,
+    SET_BRIGHTNESS,
+    SET_FAVORITE_ID,
+    SET_FAVORITE_NAME,
+    SET_LIGHTS,
+    SET_RAMP,
+    SET_SPEAKER,
+    SET_VOLUME_END,
+    SET_VOLUME_START,
+    STORAGE_VERSION,
     VERSION,
     WEEKDAYS,
 )
@@ -38,15 +53,47 @@ PLATFORMS: list[Platform] = [
     Platform.TIME,
 ]
 
+# Entity keys that exist in this version; anything else from 0.1.x is removed
+ENTITY_KEYS = {"alarm_time", "enabled", "next_alarm", "status", "stop", "test"}
+
 type SunriseAlarmConfigEntry = ConfigEntry[AlarmManager]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 ENTRY_SCHEMA = vol.Schema({vol.Required(ATTR_CONFIG_ENTRY_ID): cv.string})
-SET_DAYS_SCHEMA = ENTRY_SCHEMA.extend(
-    {vol.Required(ATTR_DAYS): vol.All(cv.ensure_list, [vol.In(WEEKDAYS)])}
+
+_percent = vol.All(vol.Coerce(int), vol.Range(min=0, max=100))
+_optional_str = vol.Any(None, cv.string)
+
+UPDATE_SCHEMA = ENTRY_SCHEMA.extend(
+    {
+        vol.Optional(ATTR_TIME): cv.time,
+        vol.Optional(ATTR_DAYS): vol.All(cv.ensure_list, [vol.In(WEEKDAYS)]),
+        vol.Optional(ATTR_ENABLED): cv.boolean,
+        vol.Optional(SET_SPEAKER): vol.Any(None, cv.entity_domain("media_player")),
+        vol.Optional(SET_FAVORITE_ID): _optional_str,
+        vol.Optional(SET_FAVORITE_NAME): _optional_str,
+        vol.Optional(SET_VOLUME_START): _percent,
+        vol.Optional(SET_VOLUME_END): _percent,
+        vol.Optional(SET_LIGHTS): vol.All(cv.ensure_list, [cv.entity_domain("light")]),
+        vol.Optional(SET_BRIGHTNESS): vol.All(
+            vol.Coerce(int), vol.Range(min=BRIGHTNESS_MIN, max=BRIGHTNESS_MAX)
+        ),
+        vol.Optional(SET_RAMP): vol.All(
+            vol.Coerce(int), vol.Range(min=RAMP_MIN, max=RAMP_MAX)
+        ),
+    }
 )
-SET_TIME_SCHEMA = ENTRY_SCHEMA.extend({vol.Required(ATTR_TIME): cv.time})
+SETTING_KEYS = (
+    SET_SPEAKER,
+    SET_FAVORITE_ID,
+    SET_FAVORITE_NAME,
+    SET_VOLUME_START,
+    SET_VOLUME_END,
+    SET_LIGHTS,
+    SET_BRIGHTNESS,
+    SET_RAMP,
+)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -77,25 +124,34 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             )
         return entry.runtime_data
 
-    async def set_days(call: ServiceCall) -> None:
-        _manager(call).set_days(call.data[ATTR_DAYS])
+    async def update(call: ServiceCall) -> None:
+        manager = _manager(call)
+        settings: dict[str, Any] = {
+            k: call.data[k] for k in SETTING_KEYS if k in call.data
+        }
+        merged = {**manager.settings, **settings}
+        if int(merged[SET_VOLUME_END]) < int(merged[SET_VOLUME_START]):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="volume_order"
+            )
+        if SET_SPEAKER in settings and settings[SET_SPEAKER] is None:
+            # No speaker means no music; forget the favorite too
+            settings[SET_FAVORITE_ID] = settings[SET_FAVORITE_NAME] = None
+        manager.update(
+            alarm_time=call.data.get(ATTR_TIME),
+            days=call.data.get(ATTR_DAYS),
+            enabled=call.data.get(ATTR_ENABLED),
+            settings=settings,
+        )
 
-    async def set_time(call: ServiceCall) -> None:
-        _manager(call).set_time(call.data[ATTR_TIME])
-
-    async def snooze(call: ServiceCall) -> None:
-        await _manager(call).async_snooze()
-
-    async def dismiss(call: ServiceCall) -> None:
-        await _manager(call).async_dismiss()
+    async def stop(call: ServiceCall) -> None:
+        await _manager(call).async_stop()
 
     async def trigger(call: ServiceCall) -> None:
-        _manager(call).start_ringing()
+        _manager(call).start()
 
-    hass.services.async_register(DOMAIN, SERVICE_SET_DAYS, set_days, SET_DAYS_SCHEMA)
-    hass.services.async_register(DOMAIN, SERVICE_SET_TIME, set_time, SET_TIME_SCHEMA)
-    hass.services.async_register(DOMAIN, SERVICE_SNOOZE, snooze, ENTRY_SCHEMA)
-    hass.services.async_register(DOMAIN, SERVICE_DISMISS, dismiss, ENTRY_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_UPDATE, update, UPDATE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_STOP, stop, ENTRY_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_TRIGGER, trigger, ENTRY_SCHEMA)
     return True
 
@@ -104,12 +160,12 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: SunriseAlarmConfigEntry
 ) -> bool:
     """Set up one alarm."""
+    _remove_old_entities(hass, entry)
     manager = AlarmManager(hass, entry)
     await manager.async_load()
     entry.runtime_data = manager
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    # All entities now exist: refresh so the card can resolve their IDs
+    # All entities exist now: refresh so the card can resolve their IDs
     manager.reschedule()
     return True
 
@@ -128,14 +184,14 @@ async def async_remove_entry(
     hass: HomeAssistant, entry: SunriseAlarmConfigEntry
 ) -> None:
     """Delete stored state when an alarm is removed."""
-    from homeassistant.helpers.storage import Store  # noqa: PLC0415
-
-    from .const import STORAGE_VERSION  # noqa: PLC0415
-
     await Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}").async_remove()
 
 
-async def _async_update_listener(
-    hass: HomeAssistant, entry: SunriseAlarmConfigEntry
-) -> None:
-    await hass.config_entries.async_reload(entry.entry_id)
+def _remove_old_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop entities from 0.1.x (day switches, snooze/dismiss) that no longer exist."""
+    reg = er.async_get(hass)
+    prefix = f"{entry.entry_id}_"
+    for ent in er.async_entries_for_config_entry(reg, entry.entry_id):
+        key = ent.unique_id.removeprefix(prefix)
+        if key not in ENTITY_KEYS:
+            reg.async_remove(ent.entity_id)

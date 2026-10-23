@@ -1,18 +1,4 @@
-set_days:
-  fields:
-    config_entry_id:
-      required: true
-      selector:
-        config_entry:
-          integration: sunrise_alarm
-    days:
-      required: true
-      selector:
-        select:
-          multiple: true
-          translation_key: days
-          options: [mon, tue, wed, thu, fri, sat, sun]
-set_time:
+update:
   fields:
     config_entry_id:
       required: true
@@ -20,17 +6,58 @@ set_time:
         config_entry:
           integration: sunrise_alarm
     time:
-      required: true
       selector:
         time:
-snooze:
-  fields:
-    config_entry_id:
-      required: true
+    days:
       selector:
-        config_entry:
-          integration: sunrise_alarm
-dismiss:
+        select:
+          multiple: true
+          translation_key: days
+          options: [mon, tue, wed, thu, fri, sat, sun]
+    enabled:
+      selector:
+        boolean:
+    speaker:
+      selector:
+        entity:
+          domain: media_player
+          integration: sonos
+    favorite_id:
+      selector:
+        text:
+    favorite_name:
+      selector:
+        text:
+    volume_start:
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    volume_end:
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    lights:
+      selector:
+        entity:
+          domain: light
+          multiple: true
+    brightness:
+      selector:
+        number:
+          min: 50
+          max: 100
+          unit_of_measurement: "%"
+    ramp_minutes:
+      selector:
+        number:
+          min: 1
+          max: 60
+          unit_of_measurement: min
+stop:
   fields:
     config_entry_id:
       required: true

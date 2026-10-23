@@ -1,4 +1,4 @@
-"""Alarm state, scheduling and wake sequences."""
+"""Alarm state, scheduling and the wake-up ramp."""
 
 from __future__ import annotations
 
@@ -16,32 +16,22 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CONF_AUTO_DISMISS,
-    CONF_KELVIN_END,
-    CONF_KELVIN_START,
-    CONF_LIGHT_FADE,
-    CONF_LIGHTS,
-    CONF_MEDIA_CONTENT_ID,
-    CONF_MEDIA_CONTENT_TYPE,
-    CONF_MEDIA_PLAYER,
-    CONF_SNOOZE,
-    CONF_SOURCE,
-    CONF_VOLUME_END,
-    CONF_VOLUME_RAMP,
-    CONF_VOLUME_START,
-    DEFAULTS,
+    DEFAULT_SETTINGS,
     DOMAIN,
-    EVENT_DISMISSED,
-    EVENT_PRE_WAKE,
-    EVENT_RINGING,
-    EVENT_SNOOZED,
-    LIGHT_STEP_SECONDS,
+    EVENT_STARTED,
+    EVENT_STOPPED,
+    SET_BRIGHTNESS,
+    SET_FAVORITE_ID,
+    SET_FAVORITE_NAME,
+    SET_LIGHTS,
+    SET_RAMP,
+    SET_SPEAKER,
+    SET_VOLUME_END,
+    SET_VOLUME_START,
     STATUS_IDLE,
-    STATUS_PRE_WAKE,
-    STATUS_RINGING,
-    STATUS_SNOOZED,
+    STATUS_WAKING,
+    STEP_SECONDS,
     STORAGE_VERSION,
-    VOLUME_STEP_SECONDS,
     WEEKDAYS,
 )
 
@@ -51,8 +41,25 @@ DEFAULT_TIME = time(7, 0)
 DEFAULT_DAYS = [0, 1, 2, 3, 4]
 
 
+def _settings_from_v1_options(options: dict[str, Any]) -> dict[str, Any]:
+    """Carry settings over from a 0.1.x alarm, where they lived in entry options."""
+    out: dict[str, Any] = {}
+    if player := options.get("media_player"):
+        out[SET_SPEAKER] = player
+    if options.get("media_content_type") == "favorite_item_id" and options.get(
+        "media_content_id"
+    ):
+        out[SET_FAVORITE_ID] = options["media_content_id"]
+    for key in (SET_VOLUME_START, SET_VOLUME_END, SET_LIGHTS):
+        if key in options:
+            out[key] = options[key]
+    if ramp := options.get("light_fade_minutes") or options.get("volume_ramp_minutes"):
+        out[SET_RAMP] = int(ramp)
+    return out
+
+
 class AlarmManager:
-    """Owns one alarm: its persisted state, timers and wake actions."""
+    """Owns one alarm: its stored settings, timer and wake-up ramp."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize."""
@@ -62,66 +69,37 @@ class AlarmManager:
             hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}"
         )
 
-        # Persisted state
         self.alarm_time: time = DEFAULT_TIME
         self.days: set[int] = set(DEFAULT_DAYS)
         self.enabled: bool = True
+        self.settings: dict[str, Any] = dict(DEFAULT_SETTINGS)
 
-        # Runtime state
         self.status: str = STATUS_IDLE
         self.next_alarm: datetime | None = None
-        self.snooze_until: datetime | None = None
-        self.last_rang: datetime | None = None
-        self._skipped: datetime | None = None
+        self.last_started: datetime | None = None
 
         self._listeners: list[Callable[[], None]] = []
-        self._timers: list[CALLBACK_TYPE] = []
-        self._auto_dismiss: CALLBACK_TYPE | None = None
-        self._light_task: asyncio.Task | None = None
-        self._volume_task: asyncio.Task | None = None
+        self._timer: CALLBACK_TYPE | None = None
+        self._task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
-    # Settings
-    # ------------------------------------------------------------------
-    def opt(self, key: str) -> Any:
-        """Return a setting from options, falling back to data and defaults."""
-        if key in self.entry.options:
-            return self.entry.options[key]
-        if key in self.entry.data:
-            return self.entry.data[key]
-        return DEFAULTS.get(key)
-
     @property
-    def lights(self) -> list[str]:
-        """Configured lights."""
-        return list(self.opt(CONF_LIGHTS) or [])
-
-    @property
-    def media_player(self) -> str | None:
-        """Configured media player."""
-        return self.opt(CONF_MEDIA_PLAYER) or None
-
-    @property
-    def fade_minutes(self) -> float:
-        """Light fade-in length; zero when no lights are configured."""
-        return float(self.opt(CONF_LIGHT_FADE) or 0) if self.lights else 0.0
+    def day_names(self) -> list[str]:
+        """Selected weekdays as short names, Monday first."""
+        return [WEEKDAYS[d] for d in sorted(self.days)]
 
     @property
     def is_repeating(self) -> bool:
         """True when at least one weekday is selected."""
         return bool(self.days)
 
-    @property
-    def day_names(self) -> list[str]:
-        """Selected weekdays as short names, Monday first."""
-        return [WEEKDAYS[d] for d in sorted(self.days)]
-
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
     async def async_load(self) -> None:
-        """Load persisted state and schedule the next alarm."""
-        if (stored := await self._store.async_load()) is not None:
+        """Load stored state and arm the next alarm."""
+        stored = await self._store.async_load()
+        if stored is not None:
             try:
                 self.alarm_time = time.fromisoformat(stored["time"])
             except (KeyError, ValueError):
@@ -130,13 +108,17 @@ class AlarmManager:
                 WEEKDAYS.index(d) for d in stored.get("days", []) if d in WEEKDAYS
             }
             self.enabled = bool(stored.get("enabled", True))
+        if stored is not None and "settings" in stored:
+            self.settings.update(stored["settings"])
+        elif self.entry.options:
+            self.settings.update(_settings_from_v1_options(dict(self.entry.options)))
+            self._save()
         self.reschedule()
 
     async def async_unload(self) -> None:
-        """Cancel everything; called when the entry unloads."""
-        self._cancel_timers()
-        self._cancel_auto_dismiss()
-        await self._cancel_tasks()
+        """Cancel the timer and any ramp in progress."""
+        self._cancel_timer()
+        self._cancel_task()
 
     @callback
     def _save(self) -> None:
@@ -145,6 +127,7 @@ class AlarmManager:
                 "time": self.alarm_time.strftime("%H:%M"),
                 "days": self.day_names,
                 "enabled": self.enabled,
+                "settings": self.settings,
             },
             1,
         )
@@ -166,36 +149,26 @@ class AlarmManager:
             update()
 
     # ------------------------------------------------------------------
-    # Mutators (called by entities and services)
+    # Changes from the card, entities and services
     # ------------------------------------------------------------------
     @callback
-    def set_time(self, value: time) -> None:
-        """Set the alarm time."""
-        self.alarm_time = value.replace(second=0, microsecond=0)
-        self._save()
-        self.reschedule()
-
-    @callback
-    def set_days(self, days: list[str]) -> None:
-        """Replace the set of weekdays."""
-        self.days = {WEEKDAYS.index(d) for d in days if d in WEEKDAYS}
-        self._save()
-        self.reschedule()
-
-    @callback
-    def set_day(self, weekday: int, on: bool) -> None:
-        """Toggle a single weekday."""
-        if on:
-            self.days.add(weekday)
-        else:
-            self.days.discard(weekday)
-        self._save()
-        self.reschedule()
-
-    @callback
-    def set_enabled(self, enabled: bool) -> None:
-        """Enable or disable the alarm."""
-        self.enabled = enabled
+    def update(
+        self,
+        *,
+        alarm_time: time | None = None,
+        days: list[str] | None = None,
+        enabled: bool | None = None,
+        settings: dict[str, Any] | None = None,
+    ) -> None:
+        """Apply any combination of changes, then save and re-arm once."""
+        if alarm_time is not None:
+            self.alarm_time = alarm_time.replace(second=0, microsecond=0)
+        if days is not None:
+            self.days = {WEEKDAYS.index(d) for d in days if d in WEEKDAYS}
+        if enabled is not None:
+            self.enabled = enabled
+        if settings:
+            self.settings.update(settings)
         self._save()
         self.reschedule()
 
@@ -203,7 +176,7 @@ class AlarmManager:
     # Scheduling
     # ------------------------------------------------------------------
     def compute_next(self, now: datetime) -> datetime | None:
-        """Return the next ring time strictly after ``now``, or None."""
+        """Return the next start time strictly after ``now``, or None."""
         if not self.enabled:
             return None
         tz = dt_util.get_default_time_zone()
@@ -214,86 +187,34 @@ class AlarmManager:
             if self.days and day.weekday() not in self.days:
                 continue
             candidate = datetime.combine(day, self.alarm_time, tzinfo=tz)
-            # Normalise so nonexistent DST times resolve to a real instant
+            # Normalise so a time skipped by DST resolves to a real instant
             candidate = dt_util.as_local(dt_util.as_utc(candidate))
-            if candidate > local_now and candidate != self._skipped:
+            if candidate > local_now:
                 return candidate
         return None
 
     @callback
     def reschedule(self) -> None:
-        """Recompute the next alarm and (re)arm timers."""
-        self._cancel_timers()
-        now = dt_util.now()
-
-        if self.status == STATUS_SNOOZED and self.snooze_until:
-            self.next_alarm = self.snooze_until
-            self._timers.append(
-                async_track_point_in_time(
-                    self.hass, self._handle_ring, self.snooze_until
-                )
+        """Recompute the next alarm and arm the timer."""
+        self._cancel_timer()
+        self.next_alarm = self.compute_next(dt_util.now())
+        if self.next_alarm is not None:
+            self._timer = async_track_point_in_time(
+                self.hass, self._handle_alarm, self.next_alarm
             )
-            self._notify()
-            return
-
-        if self.status in (STATUS_RINGING,):
-            # Don't arm the next occurrence until this one is dismissed
-            self._notify()
-            return
-
-        self.next_alarm = self.compute_next(now)
-        if self.next_alarm is None:
-            if self.status == STATUS_PRE_WAKE:
-                self._abort_pre_wake()
-            self._notify()
-            return
-
-        fade = self.fade_minutes
-        if fade > 0:
-            pre_wake = self.next_alarm - timedelta(minutes=fade)
-            if pre_wake > now:
-                if self.status == STATUS_PRE_WAKE:
-                    # Alarm moved later; restart the fade at the right time
-                    self._abort_pre_wake()
-                self._timers.append(
-                    async_track_point_in_time(
-                        self.hass, self._handle_pre_wake, pre_wake
-                    )
-                )
-            elif self.status != STATUS_PRE_WAKE:
-                # Inside the fade window already: start now with what's left
-                self._start_pre_wake((self.next_alarm - now).total_seconds())
-        elif self.status == STATUS_PRE_WAKE:
-            self._abort_pre_wake()
-
-        self._timers.append(
-            async_track_point_in_time(self.hass, self._handle_ring, self.next_alarm)
-        )
         self._notify()
 
     @callback
-    def _cancel_timers(self) -> None:
-        while self._timers:
-            self._timers.pop()()
+    def _cancel_timer(self) -> None:
+        if self._timer:
+            self._timer()
+            self._timer = None
 
     @callback
-    def _cancel_auto_dismiss(self) -> None:
-        if self._auto_dismiss:
-            self._auto_dismiss()
-            self._auto_dismiss = None
-
-    async def _cancel_tasks(self) -> None:
-        for task in (self._light_task, self._volume_task):
-            if task and not task.done():
-                task.cancel()
-        self._light_task = self._volume_task = None
-
-    @callback
-    def _cancel_task(self, attr: str) -> None:
-        task: asyncio.Task | None = getattr(self, attr)
-        if task and not task.done():
-            task.cancel()
-        setattr(self, attr, None)
+    def _cancel_task(self) -> None:
+        if self._task and not self._task.done():
+            self._task.cancel()
+        self._task = None
 
     def _event_data(self) -> dict[str, Any]:
         return {
@@ -303,207 +224,119 @@ class AlarmManager:
         }
 
     # ------------------------------------------------------------------
-    # Pre-wake (light fade)
+    # Wake-up
     # ------------------------------------------------------------------
     @callback
-    def _handle_pre_wake(self, _now: datetime) -> None:
-        self._start_pre_wake(self.fade_minutes * 60)
+    def _handle_alarm(self, _now: datetime) -> None:
+        self._timer = None
+        if not self.is_repeating:
+            # One-time alarm: switch off once it has gone off
+            self.enabled = False
+            self._save()
+        self.start()
 
     @callback
-    def _start_pre_wake(self, seconds: float) -> None:
-        self.status = STATUS_PRE_WAKE
-        self.hass.bus.async_fire(EVENT_PRE_WAKE, self._event_data())
-        self._cancel_task("_light_task")
-        self._light_task = self.entry.async_create_background_task(
-            self.hass, self._fade_lights(seconds), f"{DOMAIN} light fade"
+    def start(self) -> None:
+        """Start the wake-up ramp now."""
+        self._cancel_task()
+        self.status = STATUS_WAKING
+        self.last_started = dt_util.now()
+        self.hass.bus.async_fire(EVENT_STARTED, self._event_data())
+        self._task = self.entry.async_create_background_task(
+            self.hass, self._run_ramp(), f"{DOMAIN} wake-up ramp"
         )
-        self._notify()
+        self.reschedule()
 
-    @callback
-    def _abort_pre_wake(self) -> None:
-        self._cancel_task("_light_task")
-        self.status = STATUS_IDLE
-
-    async def _fade_lights(self, seconds: float) -> None:
-        """Step brightness 1% -> 100% (and warm -> cool) over ``seconds``."""
-        lights = self.lights
-        if not lights:
-            return
-        k_start = int(self.opt(CONF_KELVIN_START))
-        k_end = int(self.opt(CONF_KELVIN_END))
-        steps = max(1, int(seconds // LIGHT_STEP_SECONDS))
+    async def _run_ramp(self) -> None:
+        """Bring lights from off to the target and volume from start to end together."""
+        s = self.settings
+        lights: list[str] = list(s.get(SET_LIGHTS) or [])
+        target = int(s.get(SET_BRIGHTNESS) or 100)
+        speaker: str | None = s.get(SET_SPEAKER)
+        v_start = float(s.get(SET_VOLUME_START) or 0) / 100
+        v_end = float(s.get(SET_VOLUME_END) or 0) / 100
+        seconds = max(1, float(s.get(SET_RAMP) or 1)) * 60
+        steps = max(1, int(seconds // STEP_SECONDS))
         step_len = seconds / steps
-        for i in range(steps + 1):
-            frac = i / steps
-            brightness = max(1, round(1 + 99 * frac))
-            kelvin = round(k_start + (k_end - k_start) * frac)
-            await self._lights_on(lights, brightness, kelvin, step_len if i else 1)
-            if i < steps:
-                await asyncio.sleep(step_len)
 
-    async def _lights_on(
-        self, lights: list[str], brightness: int, kelvin: int | None, transition: float
-    ) -> None:
-        for light in lights:
-            data: dict[str, Any] = {
-                ATTR_ENTITY_ID: light,
-                "brightness_pct": brightness,
-                "transition": round(transition, 1),
-            }
-            if kelvin is not None and (state := self.hass.states.get(light)):
-                modes = state.attributes.get("supported_color_modes") or []
-                if "color_temp" in modes:
-                    lo = state.attributes.get("min_color_temp_kelvin") or kelvin
-                    hi = state.attributes.get("max_color_temp_kelvin") or kelvin
-                    data["color_temp_kelvin"] = min(max(kelvin, lo), hi)
-            await self._call("light", "turn_on", data)
+        try:
+            if speaker:
+                await self._start_music(speaker, v_start)
+            for i in range(steps + 1):
+                frac = i / steps
+                if lights:
+                    await self._set_lights(
+                        lights, max(1, round(target * frac)), step_len if i else 1
+                    )
+                if speaker and i and v_end != v_start:
+                    await self._call(
+                        "media_player",
+                        "volume_set",
+                        {
+                            ATTR_ENTITY_ID: speaker,
+                            "volume_level": round(
+                                v_start + (v_end - v_start) * frac, 3
+                            ),
+                        },
+                    )
+                if i < steps:
+                    await asyncio.sleep(step_len)
+        finally:
+            if self._task is asyncio.current_task():
+                self._task = None
+                self.status = STATUS_IDLE
+                self._notify()
 
-    # ------------------------------------------------------------------
-    # Ringing
-    # ------------------------------------------------------------------
-    @callback
-    def _handle_ring(self, _now: datetime) -> None:
-        self.start_ringing()
-
-    @callback
-    def start_ringing(self) -> None:
-        """Start the alarm now (also used by the test service)."""
-        self._cancel_timers()
-        self._cancel_task("_light_task")
-        self._cancel_task("_volume_task")
-        self.status = STATUS_RINGING
-        self.snooze_until = None
-        self.next_alarm = None
-        self.last_rang = dt_util.now()
-        self.hass.bus.async_fire(EVENT_RINGING, self._event_data())
-
-        if self.lights:
-            self.entry.async_create_background_task(
-                self.hass,
-                self._lights_on(self.lights, 100, int(self.opt(CONF_KELVIN_END)), 3),
-                f"{DOMAIN} lights full",
-            )
-        if self.media_player:
-            self._volume_task = self.entry.async_create_background_task(
-                self.hass, self._play_and_ramp(), f"{DOMAIN} volume ramp"
-            )
-
-        self._cancel_auto_dismiss()
-        if (minutes := self.opt(CONF_AUTO_DISMISS)) and float(minutes) > 0:
-            self._auto_dismiss = async_track_point_in_time(
-                self.hass,
-                self._handle_auto_dismiss,
-                dt_util.now() + timedelta(minutes=float(minutes)),
-            )
-        self._notify()
-
-    async def _play_and_ramp(self) -> None:
-        player = self.media_player
-        assert player
-        v_start = float(self.opt(CONF_VOLUME_START)) / 100
-        v_end = float(self.opt(CONF_VOLUME_END)) / 100
-        ramp = float(self.opt(CONF_VOLUME_RAMP) or 0) * 60
-
+    async def _start_music(self, speaker: str, volume: float) -> None:
         await self._call(
             "media_player",
             "volume_set",
-            {ATTR_ENTITY_ID: player, "volume_level": v_start},
+            {ATTR_ENTITY_ID: speaker, "volume_level": volume},
         )
-        if content_id := self.opt(CONF_MEDIA_CONTENT_ID):
+        if favorite := self.settings.get(SET_FAVORITE_ID):
             await self._call(
                 "media_player",
                 "play_media",
                 {
-                    ATTR_ENTITY_ID: player,
-                    "media_content_id": content_id,
-                    "media_content_type": self.opt(CONF_MEDIA_CONTENT_TYPE) or "music",
+                    ATTR_ENTITY_ID: speaker,
+                    "media_content_id": favorite,
+                    "media_content_type": "favorite_item_id",
                 },
             )
-        elif source := self.opt(CONF_SOURCE):
-            await self._call(
-                "media_player",
-                "select_source",
-                {ATTR_ENTITY_ID: player, "source": source},
-            )
         else:
-            await self._call("media_player", "media_play", {ATTR_ENTITY_ID: player})
+            await self._call("media_player", "media_play", {ATTR_ENTITY_ID: speaker})
 
-        if ramp <= 0 or v_end <= v_start:
-            if v_end != v_start:
-                await self._call(
-                    "media_player",
-                    "volume_set",
-                    {ATTR_ENTITY_ID: player, "volume_level": v_end},
-                )
-            return
-        steps = max(1, int(ramp // VOLUME_STEP_SECONDS))
-        for i in range(1, steps + 1):
-            await asyncio.sleep(ramp / steps)
-            level = round(v_start + (v_end - v_start) * i / steps, 3)
+    async def _set_lights(self, lights: list[str], pct: int, transition: float) -> None:
+        for light in lights:
             await self._call(
-                "media_player",
-                "volume_set",
-                {ATTR_ENTITY_ID: player, "volume_level": level},
+                "light",
+                "turn_on",
+                {
+                    ATTR_ENTITY_ID: light,
+                    "brightness_pct": pct,
+                    "transition": round(transition, 1),
+                },
             )
 
-    @callback
-    def _handle_auto_dismiss(self, _now: datetime) -> None:
-        self._auto_dismiss = None
-        self.hass.async_create_task(self.async_dismiss())
-
-    # ------------------------------------------------------------------
-    # Snooze / dismiss
-    # ------------------------------------------------------------------
-    async def async_snooze(self) -> None:
-        """Pause playback and ring again after the snooze period."""
-        if self.status != STATUS_RINGING:
+    async def async_stop(self) -> None:
+        """Stop a wake-up in progress: pause the music, leave the lights as they are."""
+        if self.status != STATUS_WAKING:
             return
-        self._cancel_task("_volume_task")
-        self._cancel_auto_dismiss()
-        await self._pause_media()
-        self.status = STATUS_SNOOZED
-        self.snooze_until = dt_util.now() + timedelta(
-            minutes=float(self.opt(CONF_SNOOZE))
-        )
-        self.hass.bus.async_fire(
-            EVENT_SNOOZED,
-            {**self._event_data(), "snooze_until": self.snooze_until.isoformat()},
-        )
-        self.reschedule()
-
-    async def async_dismiss(self) -> None:
-        """Stop the alarm and arm the next occurrence."""
-        if self.status == STATUS_IDLE:
-            return
-        was = self.status
-        self._cancel_task("_volume_task")
-        self._cancel_task("_light_task")
-        self._cancel_auto_dismiss()
-        if was in (STATUS_RINGING, STATUS_SNOOZED):
-            await self._pause_media()
+        self._cancel_task()
         self.status = STATUS_IDLE
-        self.snooze_until = None
-        if was == STATUS_PRE_WAKE and self.is_repeating:
-            # Dismissed during the fade: skip this occurrence only
-            self._skipped = self.next_alarm
-        elif not self.is_repeating:
-            # One-shot alarms switch themselves off once handled
-            self.enabled = False
-            self._save()
-        self.hass.bus.async_fire(EVENT_DISMISSED, self._event_data())
-        self.reschedule()
-
-    async def _pause_media(self) -> None:
-        if not (player := self.media_player):
-            return
-        state = self.hass.states.get(player)
-        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            return
-        await self._call("media_player", "media_pause", {ATTR_ENTITY_ID: player})
+        if (speaker := self.settings.get(SET_SPEAKER)) and (
+            state := self.hass.states.get(speaker)
+        ):
+            if state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                await self._call(
+                    "media_player", "media_pause", {ATTR_ENTITY_ID: speaker}
+                )
+        self.hass.bus.async_fire(EVENT_STOPPED, self._event_data())
+        self._notify()
 
     # ------------------------------------------------------------------
     async def _call(self, domain: str, service: str, data: dict[str, Any]) -> None:
-        """Call a service, logging instead of raising so a bad device can't stop the alarm."""
+        """Call a service; log failures so one bad device can't stop the rest."""
         try:
             await self.hass.services.async_call(domain, service, data, blocking=True)
         except asyncio.CancelledError:
@@ -517,3 +350,10 @@ class AlarmManager:
                 data.get(ATTR_ENTITY_ID),
                 err,
             )
+
+    @property
+    def favorite_label(self) -> str | None:
+        """Name of the chosen favorite, if known."""
+        return self.settings.get(SET_FAVORITE_NAME) or self.settings.get(
+            SET_FAVORITE_ID
+        )

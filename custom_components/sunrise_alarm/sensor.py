@@ -11,7 +11,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import SunriseAlarmConfigEntry
-from .const import DOMAIN, STATUSES, WEEKDAYS
+from .const import DOMAIN, STATUSES
 from .entity import SunriseAlarmEntity
 
 
@@ -26,32 +26,31 @@ async def async_setup_entry(
 
 
 class NextAlarmSensor(SunriseAlarmEntity, SensorEntity):
-    """When the alarm will next ring. Also the card's anchor entity."""
+    """When the alarm next starts. Also carries everything the card shows."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
-    _unrecorded_attributes = frozenset({"entities", "config_entry_id"})
+    _unrecorded_attributes = frozenset({"entities", "config_entry_id", "settings"})
 
     @property
     def native_value(self) -> datetime | None:
-        """Return the next ring time."""
+        """Return the next start time."""
         return self.manager.next_alarm
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose everything the card needs."""
+        """Expose state and settings for the card."""
         m = self.manager
         return {
             "status": m.status,
             "alarm_time": m.alarm_time.strftime("%H:%M"),
             "enabled": m.enabled,
             "days": m.day_names,
-            "snooze_until": m.snooze_until.isoformat() if m.snooze_until else None,
-            "light_fade_minutes": m.fade_minutes,
+            "settings": dict(m.settings),
             "config_entry_id": m.entry.entry_id,
             "entities": self._related_entities(),
         }
 
-    def _related_entities(self) -> dict[str, Any]:
+    def _related_entities(self) -> dict[str, str | None]:
         reg = er.async_get(self.hass)
         prefix = self.manager.entry.entry_id
 
@@ -62,15 +61,13 @@ class NextAlarmSensor(SunriseAlarmEntity, SensorEntity):
             "alarm_time": eid("time", "alarm_time"),
             "enabled": eid("switch", "enabled"),
             "status": eid("sensor", "status"),
-            "snooze": eid("button", "snooze"),
-            "dismiss": eid("button", "dismiss"),
+            "stop": eid("button", "stop"),
             "test": eid("button", "test"),
-            "days": {d: eid("switch", f"day_{d}") for d in WEEKDAYS},
         }
 
 
 class StatusSensor(SunriseAlarmEntity, SensorEntity):
-    """idle / pre_wake / ringing / snoozed."""
+    """idle or waking."""
 
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = STATUSES

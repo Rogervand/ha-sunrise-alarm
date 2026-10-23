@@ -22,7 +22,7 @@ async def async_setup_entry(
 
 
 class AlarmTime(SunriseAlarmEntity, TimeEntity):
-    """The time the alarm rings."""
+    """The time the wake-up starts."""
 
     @property
     def native_value(self) -> time:
@@ -31,4 +31,4 @@ class AlarmTime(SunriseAlarmEntity, TimeEntity):
 
     async def async_set_value(self, value: time) -> None:
         """Change the alarm time."""
-        self.manager.set_time(value)
+        self.manager.update(alarm_time=value)

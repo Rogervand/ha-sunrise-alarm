@@ -1,6 +1,9 @@
 {
   "domain": "sunrise_alarm",
   "name": "Sunrise Alarm Clock",
+  "after_dependencies": [
+    "sonos"
+  ],
   "codeowners": [
     "@Rogervand"
   ],
@@ -14,5 +17,5 @@
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/Rogervand/ha-sunrise-alarm/issues",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

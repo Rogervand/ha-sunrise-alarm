@@ -3,93 +3,17 @@
     "step": {
       "user": {
         "title": "New alarm",
-        "description": "Pick what should wake you. You'll set the time and days on the alarm's device page or the dashboard card.",
+        "description": "Give the alarm a name, usually the room it wakes. You'll set the time, speaker, favorite and lights on the Sunrise Alarm dashboard card.",
         "data": {
-          "name": "Alarm name",
-          "media_player": "Speaker",
-          "source": "Source / favorite",
-          "media_content_id": "Media content ID",
-          "media_content_type": "Media content type",
-          "volume_start": "Starting volume",
-          "volume_end": "Final volume",
-          "volume_ramp_minutes": "Volume ramp",
-          "lights": "Lights",
-          "light_fade_minutes": "Light fade-in",
-          "kelvin_start": "Starting color temperature",
-          "kelvin_end": "Final color temperature",
-          "snooze_minutes": "Snooze length",
-          "auto_dismiss_minutes": "Auto-dismiss after"
-        },
-        "data_description": {
-          "name": "Shown as the device name, e.g. Bedroom alarm.",
-          "media_player": "Media player to wake you, e.g. a Sonos speaker. Optional if you only use lights.",
-          "source": "Name of a source or Sonos favorite to select. Used when no media content ID is set.",
-          "media_content_id": "Exact content to play (URL, playlist ID, favorite item ID). Takes priority over Source.",
-          "media_content_type": "Type for the content ID above.",
-          "volume_ramp_minutes": "Minutes to go from starting to final volume. 0 = jump straight to final volume.",
-          "lights": "Lights to fade in before the alarm.",
-          "light_fade_minutes": "Lights start this many minutes before the alarm time and reach full brightness when it rings. 0 = lights turn on at alarm time.",
-          "kelvin_start": "Warm start for lights that support color temperature.",
-          "auto_dismiss_minutes": "Stop playback automatically if nobody dismisses. 0 = never."
+          "name": "Name"
         }
       }
-    },
-    "error": {
-      "nothing_to_do": "Choose a speaker, lights, or both.",
-      "volume_order": "Final volume must be at least the starting volume."
     },
     "abort": {
       "already_configured": "An alarm with this name already exists."
     }
   },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Wake actions",
-        "data": {
-          "media_player": "Speaker",
-          "source": "Source / favorite",
-          "media_content_id": "Media content ID",
-          "media_content_type": "Media content type",
-          "volume_start": "Starting volume",
-          "volume_end": "Final volume",
-          "volume_ramp_minutes": "Volume ramp",
-          "lights": "Lights",
-          "light_fade_minutes": "Light fade-in",
-          "kelvin_start": "Starting color temperature",
-          "kelvin_end": "Final color temperature",
-          "snooze_minutes": "Snooze length",
-          "auto_dismiss_minutes": "Auto-dismiss after"
-        },
-        "data_description": {
-          "media_player": "Media player to wake you, e.g. a Sonos speaker. Optional if you only use lights.",
-          "source": "Name of a source or Sonos favorite to select. Used when no media content ID is set.",
-          "media_content_id": "Exact content to play (URL, playlist ID, favorite item ID). Takes priority over Source.",
-          "media_content_type": "Type for the content ID above.",
-          "volume_ramp_minutes": "Minutes to go from starting to final volume. 0 = jump straight to final volume.",
-          "lights": "Lights to fade in before the alarm.",
-          "light_fade_minutes": "Lights start this many minutes before the alarm time and reach full brightness when it rings. 0 = lights turn on at alarm time.",
-          "kelvin_start": "Warm start for lights that support color temperature.",
-          "auto_dismiss_minutes": "Stop playback automatically if nobody dismisses. 0 = never."
-        }
-      }
-    },
-    "error": {
-      "nothing_to_do": "Choose a speaker, lights, or both.",
-      "volume_order": "Final volume must be at least the starting volume."
-    }
-  },
   "selector": {
-    "media_content_type": {
-      "options": {
-        "music": "Music",
-        "playlist": "Playlist",
-        "favorite_item_id": "Sonos favorite (item ID)",
-        "url": "URL",
-        "channel": "Channel",
-        "podcast": "Podcast"
-      }
-    },
     "days": {
       "options": {
         "mon": "Monday",
@@ -111,27 +35,6 @@
     "switch": {
       "enabled": {
         "name": "Alarm"
-      },
-      "day_mon": {
-        "name": "Monday"
-      },
-      "day_tue": {
-        "name": "Tuesday"
-      },
-      "day_wed": {
-        "name": "Wednesday"
-      },
-      "day_thu": {
-        "name": "Thursday"
-      },
-      "day_fri": {
-        "name": "Friday"
-      },
-      "day_sat": {
-        "name": "Saturday"
-      },
-      "day_sun": {
-        "name": "Sunday"
       }
     },
     "sensor": {
@@ -142,18 +45,13 @@
         "name": "Status",
         "state": {
           "idle": "Idle",
-          "pre_wake": "Lights fading in",
-          "ringing": "Ringing",
-          "snoozed": "Snoozed"
+          "waking": "Waking"
         }
       }
     },
     "button": {
-      "snooze": {
-        "name": "Snooze"
-      },
-      "dismiss": {
-        "name": "Dismiss"
+      "stop": {
+        "name": "Stop"
       },
       "test": {
         "name": "Test alarm"
@@ -166,26 +64,15 @@
     },
     "alarm_not_loaded": {
       "message": "Alarm {name} is not loaded."
+    },
+    "volume_order": {
+      "message": "End volume must be at least the start volume."
     }
   },
   "services": {
-    "set_days": {
-      "name": "Set days",
-      "description": "Set which weekdays an alarm repeats on. An empty list makes it a one-time alarm.",
-      "fields": {
-        "config_entry_id": {
-          "name": "Alarm",
-          "description": "The alarm to change."
-        },
-        "days": {
-          "name": "Days",
-          "description": "Weekdays the alarm rings on."
-        }
-      }
-    },
-    "set_time": {
-      "name": "Set time",
-      "description": "Set an alarm's time.",
+    "update": {
+      "name": "Update alarm",
+      "description": "Change any of an alarm's settings. Fields you leave out stay as they are.",
       "fields": {
         "config_entry_id": {
           "name": "Alarm",
@@ -193,37 +80,67 @@
         },
         "time": {
           "name": "Time",
-          "description": "New alarm time."
+          "description": "When the wake-up starts."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Weekdays it repeats on. Empty means one time only."
+        },
+        "enabled": {
+          "name": "On",
+          "description": "Whether the alarm is armed."
+        },
+        "speaker": {
+          "name": "Sonos speaker",
+          "description": "Speaker to play on."
+        },
+        "favorite_id": {
+          "name": "Favorite ID",
+          "description": "Sonos favorite item ID (from the Sonos favorites sensor)."
+        },
+        "favorite_name": {
+          "name": "Favorite name",
+          "description": "Display name of the favorite."
+        },
+        "volume_start": {
+          "name": "Start volume",
+          "description": "Volume when the music starts."
+        },
+        "volume_end": {
+          "name": "End volume",
+          "description": "Volume at the end of the ramp."
+        },
+        "lights": {
+          "name": "Lights",
+          "description": "Lights to bring up from off."
+        },
+        "brightness": {
+          "name": "Brightness",
+          "description": "Light brightness at the end of the ramp."
+        },
+        "ramp_minutes": {
+          "name": "Ramp time",
+          "description": "Minutes for lights and volume to reach their end levels."
         }
       }
     },
-    "snooze": {
-      "name": "Snooze",
-      "description": "Snooze a ringing alarm.",
+    "stop": {
+      "name": "Stop",
+      "description": "Stop a wake-up in progress and pause the music.",
       "fields": {
         "config_entry_id": {
           "name": "Alarm",
-          "description": "The alarm to snooze."
-        }
-      }
-    },
-    "dismiss": {
-      "name": "Dismiss",
-      "description": "Stop a ringing or snoozed alarm, or skip a fade-in already under way.",
-      "fields": {
-        "config_entry_id": {
-          "name": "Alarm",
-          "description": "The alarm to dismiss."
+          "description": "The alarm to change."
         }
       }
     },
     "trigger": {
-      "name": "Trigger",
-      "description": "Ring an alarm now, for testing.",
+      "name": "Start now",
+      "description": "Start the wake-up now, for testing.",
       "fields": {
         "config_entry_id": {
           "name": "Alarm",
-          "description": "The alarm to ring."
+          "description": "The alarm to change."
         }
       }
     }

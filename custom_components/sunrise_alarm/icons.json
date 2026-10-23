@@ -11,48 +11,6 @@
         "state": {
           "on": "mdi:alarm-check"
         }
-      },
-      "day_mon": {
-        "default": "mdi:calendar-blank-outline",
-        "state": {
-          "on": "mdi:calendar-check"
-        }
-      },
-      "day_tue": {
-        "default": "mdi:calendar-blank-outline",
-        "state": {
-          "on": "mdi:calendar-check"
-        }
-      },
-      "day_wed": {
-        "default": "mdi:calendar-blank-outline",
-        "state": {
-          "on": "mdi:calendar-check"
-        }
-      },
-      "day_thu": {
-        "default": "mdi:calendar-blank-outline",
-        "state": {
-          "on": "mdi:calendar-check"
-        }
-      },
-      "day_fri": {
-        "default": "mdi:calendar-blank-outline",
-        "state": {
-          "on": "mdi:calendar-check"
-        }
-      },
-      "day_sat": {
-        "default": "mdi:calendar-blank-outline",
-        "state": {
-          "on": "mdi:calendar-check"
-        }
-      },
-      "day_sun": {
-        "default": "mdi:calendar-blank-outline",
-        "state": {
-          "on": "mdi:calendar-check"
-        }
       }
     },
     "sensor": {
@@ -63,18 +21,13 @@
         "default": "mdi:alarm",
         "state": {
           "idle": "mdi:alarm",
-          "pre_wake": "mdi:weather-sunset-up",
-          "ringing": "mdi:alarm-light",
-          "snoozed": "mdi:alarm-snooze"
+          "waking": "mdi:weather-sunset-up"
         }
       }
     },
     "button": {
-      "snooze": {
-        "default": "mdi:alarm-snooze"
-      },
-      "dismiss": {
-        "default": "mdi:alarm-off"
+      "stop": {
+        "default": "mdi:stop-circle-outline"
       },
       "test": {
         "default": "mdi:play-circle-outline"
@@ -82,20 +35,14 @@
     }
   },
   "services": {
-    "set_days": {
-      "service": "mdi:calendar-week"
+    "update": {
+      "service": "mdi:alarm-plus"
     },
-    "set_time": {
-      "service": "mdi:clock-edit-outline"
-    },
-    "snooze": {
-      "service": "mdi:alarm-snooze"
-    },
-    "dismiss": {
-      "service": "mdi:alarm-off"
+    "stop": {
+      "service": "mdi:stop-circle-outline"
     },
     "trigger": {
-      "service": "mdi:alarm-light"
+      "service": "mdi:play-circle-outline"
     }
   }
 }
