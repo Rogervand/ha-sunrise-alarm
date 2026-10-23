@@ -8,7 +8,7 @@
  * favorite, volume, lights, brightness, ramp time) is set from the card.
  */
 
-const CARD_VERSION = "0.2.0";
+const CARD_VERSION = "1.0.0";
 const DOMAIN = "sunrise_alarm";
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -45,13 +45,19 @@ const STYLE = `
     background: #f08a24; color: #fff; font: 500 16px/1 inherit; font-family: inherit; cursor: pointer; }
   .stop[hidden] { display: none; }
 
-  .toggle { display: flex; align-items: center; gap: 8px; margin: 14px -16px -16px; padding: 12px 16px;
+  .toggle { display: block; margin: 14px -16px -16px; padding: 12px 16px;
     border-top: 1px solid var(--divider-color); cursor: pointer; background: none; border-left: 0;
     border-right: 0; border-bottom: 0; width: calc(100% + 32px); text-align: left; font-family: inherit;
     color: var(--primary-text-color); }
-  .toggle .label { font-size: 14px; font-weight: 500; flex: none; }
-  .toggle .brief { font-size: 13px; color: var(--secondary-text-color); flex: 1; min-width: 0;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+  .toggle .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .toggle .label { font-size: 14px; font-weight: 500; }
+  .brief { display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 4px;
+    margin-top: 8px; font-size: 13px; }
+  .brief .k { color: var(--secondary-text-color); }
+  .brief .v { color: var(--primary-text-color); min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brief .v.none { color: var(--secondary-text-color); }
+  .open .brief { display: none; }
   .chev { width: 18px; height: 18px; flex: none; transition: transform 150ms; fill: var(--secondary-text-color); }
   .open .chev { transform: rotate(180deg); }
   .open .toggle { margin-bottom: 0; }
@@ -207,7 +213,12 @@ class SunriseAlarmCard extends HTMLElement {
         <button class="stop" hidden>Stop</button>
 
         <button class="toggle" aria-expanded="false">
-          <span class="label">Wake-up settings</span><span class="brief"></span>${CHEVRON}
+          <span class="head"><span class="label">Wake-up settings</span>${CHEVRON}</span>
+          <span class="brief">
+            <span class="k">Station</span><span class="v" data-brief="station"></span>
+            <span class="k">Lights</span><span class="v" data-brief="lights"></span>
+            <span class="k">Ramp time</span><span class="v" data-brief="ramp"></span>
+          </span>
         </button>
         <div class="settings">
           <div class="group">
@@ -352,12 +363,18 @@ class SunriseAlarmCard extends HTMLElement {
     });
     $(".stop").hidden = !waking;
 
-    // Collapsed one-line summary
-    const parts = [];
-    if (s.speaker) parts.push(s.favorite_name || this._name(s.speaker));
-    if (s.lights?.length) parts.push(s.lights.length === 1 ? this._name(s.lights[0]) : `${s.lights.length} lights`);
-    parts.push(`${s.ramp_minutes} min`);
-    $(".brief").textContent = parts.join(" · ");
+    // Collapsed summary: one line each for station, lights and ramp time
+    const brief = (key, text) => {
+      const el = this.shadowRoot.querySelector(`[data-brief="${key}"]`);
+      el.textContent = text || "None";
+      el.classList.toggle("none", !text);
+      el.title = text || "";
+    };
+    brief("station", s.speaker
+      ? `${s.favorite_name || "Resume playback"} on ${this._name(s.speaker)}` : "");
+    brief("lights", s.lights?.length
+      ? `${s.lights.map((id) => this._name(id)).join(", ")} · ${s.brightness}%` : "");
+    brief("ramp", `${s.ramp_minutes} min`);
     $(".toggle").setAttribute("aria-expanded", this._open);
 
     if (!this._open) return;

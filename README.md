@@ -93,7 +93,7 @@ actions:
 
 - If a speaker or light fails, the rest of the wake-up still runs; the failure is logged.
 - If Home Assistant restarts mid-ramp, the ramp stops and the next alarm is armed.
-- Upgrading from 0.1: speaker, favorite, lights and volumes carry over; the old snooze button and per-day switches are removed.
+- Upgrading from 0.x: speaker, favorite, lights and volumes carry over; the old snooze button and per-day switches are removed.
 
 ## Development
 
