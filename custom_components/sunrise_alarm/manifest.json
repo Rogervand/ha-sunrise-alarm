@@ -1,10 +1,6 @@
 {
   "domain": "sunrise_alarm",
   "name": "Sunrise Alarm Clock",
-  "categories": [
-    "helpers",
-    "lighting"
-  ],
   "codeowners": [
     "@Rogervand"
   ],
