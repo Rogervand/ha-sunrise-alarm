@@ -8,7 +8,7 @@
  * favorite, volume, lights, brightness, ramp time) is set from the card.
  */
 
-const CARD_VERSION = "1.0.0";
+const CARD_VERSION = "1.0.1";
 const DOMAIN = "sunrise_alarm";
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -87,6 +87,7 @@ const STYLE = `
     border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color);
     font: 500 14px inherit; font-family: inherit; }
   .warn { color: var(--error-color); font-size: 14px; }
+  .loading { color: var(--secondary-text-color); font-size: 14px; min-height: 120px; }
 `;
 
 const CHEVRON = `<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.41 8.58 12 13.17l4.59-4.59L18 10l-6 6-6-6z"/></svg>`;
@@ -332,10 +333,20 @@ class SunriseAlarmCard extends HTMLElement {
     if (!SunriseAlarmCard.isAlarm(st)) {
       if (!this.shadowRoot) this.attachShadow({ mode: "open" });
       this._built = false;
-      this.shadowRoot.innerHTML = `<style>${STYLE}</style><ha-card><div class="warn">
-        ${esc(this._config.entity)} isn't a Sunrise Alarm "Next alarm" sensor. Pick one in the card editor.</div></ha-card>`;
+      // While Home Assistant is starting (or the alarm hasn't loaded yet) the
+      // sensor is missing or unavailable: wait quietly, it fills in by itself.
+      const starting = this._hass.config?.state && this._hass.config.state !== "RUNNING";
+      const waiting = starting || (st && st.state === "unavailable");
+      const html = waiting
+        ? `<div class="loading">${esc(this._config.name || "Alarm")} · loading…</div>`
+        : `<div class="warn">${esc(this._config.entity)} isn't a Sunrise Alarm "Next alarm" sensor. Pick one in the card editor.</div>`;
+      if (this._placeholder !== html) {
+        this.shadowRoot.innerHTML = `<style>${STYLE}</style><ha-card>${html}</ha-card>`;
+        this._placeholder = html;
+      }
       return;
     }
+    this._placeholder = null;
     if (!this._built) this._build();
     const $ = (s) => this.shadowRoot.querySelector(s);
     const a = st.attributes, s = a.settings;

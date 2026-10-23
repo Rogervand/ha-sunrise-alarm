@@ -54,7 +54,7 @@ entity: sensor.bedroom_next_alarm
 # name: Bedroom   # optional, overrides the title
 ```
 
-The card is installed with the integration; there is no separate dashboard resource to add.
+The card is installed with the integration. It copies the card to `www/sunrise_alarm/` and adds it as a dashboard resource automatically, so it loads even if you open a dashboard while Home Assistant is still starting. (If your dashboard resources are managed in YAML, add `/local/sunrise_alarm/sunrise-alarm-card.js` as a `module` resource yourself.)
 
 ## Entities (per alarm)
 

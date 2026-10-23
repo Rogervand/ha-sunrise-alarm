@@ -23,7 +23,7 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 def mock_frontend():
     """Skip real frontend/http/sonos setup; record the extra JS URL."""
     with (
-        patch("custom_components.sunrise_alarm.add_extra_js_url") as js,
+        patch("custom_components.sunrise_alarm.card_loader.add_extra_js_url") as js,
         patch(
             "homeassistant.loader.Integration.dependencies",
             new_callable=lambda: property(
@@ -42,6 +42,12 @@ def mock_frontend():
         ),
     ):
         yield js
+
+
+@pytest.fixture(autouse=True)
+def isolated_config_dir(hass: HomeAssistant, tmp_path):
+    """Give each test its own config folder so the card copy lands in tmp."""
+    hass.config.config_dir = str(tmp_path)
 
 
 @pytest.fixture

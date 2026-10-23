@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.components.frontend import add_extra_js_url
-from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -17,6 +14,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
+from .card_loader import async_remove_card, async_setup_card
 from .const import (
     ATTR_CONFIG_ENTRY_ID,
     ATTR_DAYS,
@@ -24,8 +22,6 @@ from .const import (
     ATTR_TIME,
     BRIGHTNESS_MAX,
     BRIGHTNESS_MIN,
-    CARD_URL,
-    CARD_URL_BASE,
     DOMAIN,
     RAMP_MAX,
     RAMP_MIN,
@@ -41,7 +37,6 @@ from .const import (
     SET_VOLUME_END,
     SET_VOLUME_START,
     STORAGE_VERSION,
-    VERSION,
     WEEKDAYS,
 )
 from .manager import AlarmManager
@@ -98,14 +93,7 @@ SETTING_KEYS = (
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Serve the dashboard card and register services."""
-    await hass.http.async_register_static_paths(
-        [
-            StaticPathConfig(
-                CARD_URL_BASE, str(Path(__file__).parent / "frontend"), False
-            )
-        ]
-    )
-    add_extra_js_url(hass, f"{CARD_URL}?v={VERSION}")
+    await async_setup_card(hass)
 
     def _manager(call: ServiceCall) -> AlarmManager:
         entry_id = call.data[ATTR_CONFIG_ENTRY_ID]
@@ -185,6 +173,13 @@ async def async_remove_entry(
 ) -> None:
     """Delete stored state when an alarm is removed."""
     await Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}").async_remove()
+    remaining = [
+        e
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if e.entry_id != entry.entry_id
+    ]
+    if not remaining:
+        await async_remove_card(hass)
 
 
 def _remove_old_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:

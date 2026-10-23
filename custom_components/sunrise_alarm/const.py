@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "sunrise_alarm"
-VERSION: Final = "1.0.0"
+VERSION: Final = "1.0.1"
 
 STORAGE_VERSION: Final = 1
 

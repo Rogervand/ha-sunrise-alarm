@@ -1,21 +1,19 @@
 {
   "domain": "sunrise_alarm",
   "name": "Sunrise Alarm Clock",
-  "after_dependencies": [
-    "sonos"
-  ],
   "codeowners": [
     "@Rogervand"
   ],
   "config_flow": true,
   "dependencies": [
     "frontend",
-    "http"
+    "http",
+    "lovelace"
   ],
   "documentation": "https://github.com/Rogervand/ha-sunrise-alarm",
   "integration_type": "service",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/Rogervand/ha-sunrise-alarm/issues",
   "requirements": [],
-  "version": "1.0.0"
+  "version": "1.0.1"
 }
