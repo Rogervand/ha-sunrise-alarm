@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "sunrise_alarm"
-VERSION: Final = "1.0.2"
+VERSION: Final = "1.1.0"
 
 STORAGE_VERSION: Final = 1
 
@@ -23,6 +23,7 @@ SET_VOLUME_END: Final = "volume_end"
 SET_LIGHTS: Final = "lights"
 SET_BRIGHTNESS: Final = "brightness"
 SET_RAMP: Final = "ramp_minutes"
+SET_RUN: Final = "run_minutes"
 
 DEFAULT_SETTINGS: Final[dict[str, object]] = {
     SET_SPEAKER: None,
@@ -33,24 +34,29 @@ DEFAULT_SETTINGS: Final[dict[str, object]] = {
     SET_LIGHTS: [],
     SET_BRIGHTNESS: 80,
     SET_RAMP: 10,
+    SET_RUN: 60,
 }
 
 BRIGHTNESS_MIN: Final = 50
 BRIGHTNESS_MAX: Final = 100
 RAMP_MIN: Final = 1
 RAMP_MAX: Final = 60
+RUN_MIN: Final = 5
+RUN_MAX: Final = 300
 
 # Weekdays, Monday == 0 (matches datetime.weekday())
 WEEKDAYS: Final = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 # Alarm status
 STATUS_IDLE: Final = "idle"
-STATUS_WAKING: Final = "waking"
-STATUSES: Final = [STATUS_IDLE, STATUS_WAKING]
+STATUS_WAKING: Final = "waking"  # ramping up
+STATUS_RUNNING: Final = "running"  # ramp done, on until the run time ends
+STATUSES: Final = [STATUS_IDLE, STATUS_WAKING, STATUS_RUNNING]
 
 # Events fired on the bus
 EVENT_STARTED: Final = f"{DOMAIN}_started"
 EVENT_STOPPED: Final = f"{DOMAIN}_stopped"
+EVENT_FINISHED: Final = f"{DOMAIN}_finished"
 
 # Services
 SERVICE_UPDATE: Final = "update"

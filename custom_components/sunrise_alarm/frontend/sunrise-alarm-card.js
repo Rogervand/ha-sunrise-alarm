@@ -8,9 +8,10 @@
  * favorite, volume, lights, brightness, ramp time) is set from the card.
  */
 
-const CARD_VERSION = "1.0.2";
+const CARD_VERSION = "1.1.0";
 const DOMAIN = "sunrise_alarm";
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const SLIDERS = ["volume_start", "volume_end", "brightness", "ramp_minutes", "run_minutes"];
 
 const STYLE = `
   :host { display: block; }
@@ -241,6 +242,7 @@ class SunriseAlarmCard extends HTMLElement {
             <span class="k" data-brief-k="volume">Volume</span><span class="v" data-brief="volume"></span>
             <span class="k">Lights</span><span class="v" data-brief="lights"></span>
             <span class="k">Ramp time</span><span class="v" data-brief="ramp"></span>
+            <span class="k">Turns off</span><span class="v" data-brief="run"></span>
           </span>
         </button>
         <div class="settings">
@@ -274,6 +276,11 @@ class SunriseAlarmCard extends HTMLElement {
               <div class="slider-head"><span>Ramp time</span><b data-out="ramp_minutes"></b></div>
               <input type="range" id="ramp_minutes" min="1" max="60" step="1" aria-label="Ramp time">
               <div class="hint">Lights rise from off and volume rises from start to end over this time, starting at the alarm time.</div>
+            </div>
+            <div class="field">
+              <div class="slider-head"><span>Turn off after</span><b data-out="run_minutes"></b></div>
+              <input type="range" id="run_minutes" min="5" max="300" step="5" aria-label="Turn off after">
+              <div class="hint">Counted from the alarm time. Then the music pauses and the lights turn off.</div>
             </div>
             <button class="test">Test now</button>
           </div>
@@ -317,7 +324,7 @@ class SunriseAlarmCard extends HTMLElement {
       this._update({ lights: lights.filter((l) => l !== id) });
     });
 
-    for (const key of ["volume_start", "volume_end", "brightness", "ramp_minutes"]) {
+    for (const key of SLIDERS) {
       const el = $(`#${key}`);
       const out = this.shadowRoot.querySelector(`[data-out="${key}"]`);
       el.addEventListener("pointerdown", () => { el.dataset.dragging = "1"; });
@@ -330,6 +337,9 @@ class SunriseAlarmCard extends HTMLElement {
         const s = this._hass.states[this._config.entity].attributes.settings;
         if (key === "volume_start" && v > s.volume_end) data.volume_end = v;
         if (key === "volume_end" && v < s.volume_start) data.volume_start = v;
+        // Keep the run time at least as long as the ramp
+        if (key === "ramp_minutes" && v > s.run_minutes) data.run_minutes = Math.ceil(v / 5) * 5;
+        if (key === "run_minutes" && v < s.ramp_minutes) data.ramp_minutes = v;
         this._update(data);
       });
     }
@@ -337,7 +347,22 @@ class SunriseAlarmCard extends HTMLElement {
     this._lists = {};
   }
 
-  _fmtSlider(key, v) { return key === "ramp_minutes" ? `${v} min` : `${v}%`; }
+  _fmtSlider(key, v) {
+    if (key === "ramp_minutes") return `${v} min`;
+    if (key === "run_minutes") return this._fmtDuration(Number(v));
+    return `${v}%`;
+  }
+
+  _fmtDuration(mins) {
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return h ? (m ? `${h} h ${m} min` : `${h} h`) : `${m} min`;
+  }
+
+  _fmtClock(iso) {
+    const d = new Date(iso);
+    const t = this._fmt(`${d.getHours()}:${d.getMinutes()}`);
+    return `${t.time}${t.ampm ? " " + t.ampm : ""}`;
+  }
 
   _setOptions(sel, key, options, value) {
     // options: [[value, label]]; rebuild only when the list changes
@@ -373,7 +398,7 @@ class SunriseAlarmCard extends HTMLElement {
     if (!this._built) this._build();
     const $ = (s) => this.shadowRoot.querySelector(s);
     const a = st.attributes, s = a.settings;
-    const waking = a.status === "waking";
+    const waking = a.status === "waking" || a.status === "running";
 
     const card = $("ha-card");
     card.className = [waking ? "waking" : "", a.enabled || waking ? "" : "off", this._open ? "open" : ""].join(" ");
@@ -422,6 +447,8 @@ class SunriseAlarmCard extends HTMLElement {
       ? `${esc(lightsNow.join(", "))} <span class="sub">· alarm ${s.brightness}%</span>` : "",
       lightsNow.length ? `Now ${lightsNow.join(", ")} · alarm ${s.brightness}%` : "");
     brief("ramp", `${s.ramp_minutes} min`, `${s.ramp_minutes} min`);
+    const run = a.off_at ? `at ${this._fmtClock(a.off_at)}` : `after ${this._fmtDuration(s.run_minutes ?? 60)}`;
+    brief("run", esc(run), run);
     $(".toggle").setAttribute("aria-expanded", this._open);
 
     if (!this._open) return;
@@ -454,7 +481,7 @@ class SunriseAlarmCard extends HTMLElement {
     const avail = this._lights().filter((id) => !lights.includes(id));
     this._setOptions($("#add-light"), "lights", [["", lights.length ? "Add another light…" : "Add a light…"], ...avail.map((id) => [id, this._name(id)])], "");
 
-    for (const key of ["volume_start", "volume_end", "brightness", "ramp_minutes"]) {
+    for (const key of SLIDERS) {
       const el = $(`#${key}`);
       if (!this._busy(el)) {
         el.value = s[key];
@@ -465,7 +492,9 @@ class SunriseAlarmCard extends HTMLElement {
 
   _summary(st) {
     const a = st.attributes;
-    if (a.status === "waking") return "<b>Waking up</b>";
+    const off = a.off_at ? ` · turns off at ${esc(this._fmtClock(a.off_at))}` : "";
+    if (a.status === "waking") return `<b>Waking up</b>${off}`;
+    if (a.status === "running") return `<b>On</b>${off}`;
     if (!a.enabled) return "Off";
     if (!st.state || ["unknown", "unavailable"].includes(st.state)) return "";
     const d = new Date(st.state), now = new Date();

@@ -22,10 +22,11 @@ Each alarm gets its own dashboard card, so you can put the bedroom alarm on the 
 | Lights | One or more lights. |
 | Brightness | 50–100%. Lights rise from off to this level over the ramp time. |
 | Ramp time | 1–60 minutes, shared by lights and volume. |
+| Turn off after | 5 minutes to 5 hours, counted from the alarm time (at least the ramp time). Then the music pauses and the lights turn off. |
 
-When collapsed, the card lists the station, the speaker's **current volume** (and whether it's playing), each light's **current brightness**, and the ramp time, next to the alarm's target levels. These update live; current levels also appear in the expanded settings.
+When collapsed, the card lists the station, the speaker's **current volume** (and whether it's playing), each light's **current brightness**, the ramp time and when it turns off, next to the alarm's target levels. These update live; current levels also appear in the expanded settings.
 
-While an alarm is waking you, the card shows a **Stop** button: it pauses the music and leaves the lights where they are. Once the ramp finishes the alarm is done; the music keeps playing until you stop it in Sonos. **Test now** runs the wake-up immediately.
+While an alarm is going, the card shows when it will turn off and a **Stop** button. Stop pauses the music, leaves the lights where they are, and cancels the automatic turn-off. Otherwise, when the *Turn off after* time is up, the music pauses and the lights turn off. **Test now** runs the alarm immediately.
 
 ## Requirements
 
@@ -65,19 +66,19 @@ The card is installed with the integration. It copies the card to `www/sunrise_a
 | `time.<alarm>_alarm_time` | Alarm time |
 | `switch.<alarm>_alarm` | On/off |
 | `sensor.<alarm>_next_alarm` | Next start time; the card reads its settings from here |
-| `sensor.<alarm>_status` | `idle` or `waking` |
-| `button.<alarm>_stop` | Stop a wake-up in progress |
+| `sensor.<alarm>_status` | `idle`, `waking` (ramping up) or `running` (on until it turns off) |
+| `button.<alarm>_stop` | Stop an alarm in progress |
 | `button.<alarm>_test_alarm` | Start now |
 
 ## Actions
 
 | Action | Fields |
 |---|---|
-| `sunrise_alarm.update` | `config_entry_id` plus any of `time`, `days`, `enabled`, `speaker`, `favorite_id`, `favorite_name`, `volume_start`, `volume_end`, `lights`, `brightness`, `ramp_minutes` |
+| `sunrise_alarm.update` | `config_entry_id` plus any of `time`, `days`, `enabled`, `speaker`, `favorite_id`, `favorite_name`, `volume_start`, `volume_end`, `lights`, `brightness`, `ramp_minutes`, `run_minutes` |
 | `sunrise_alarm.stop` | `config_entry_id` |
 | `sunrise_alarm.trigger` | `config_entry_id` (start now) |
 
-Events `sunrise_alarm_started` and `sunrise_alarm_stopped` carry `config_entry_id`, `name` and `alarm_time`, e.g. to open the blinds:
+Events `sunrise_alarm_started`, `sunrise_alarm_stopped` (Stop pressed) and `sunrise_alarm_finished` (turned off automatically) carry `config_entry_id`, `name` and `alarm_time`, e.g. to open the blinds:
 
 ```yaml
 triggers:
@@ -94,7 +95,7 @@ actions:
 ## Notes
 
 - If a speaker or light fails, the rest of the wake-up still runs; the failure is logged.
-- If Home Assistant restarts mid-ramp, the ramp stops and the next alarm is armed.
+- If Home Assistant restarts mid-ramp, the ramp stops, but the automatic turn-off still happens on time.
 - Upgrading from 0.x: speaker, favorite, lights and volumes carry over; the old snooze button and per-day switches are removed.
 
 ## Development

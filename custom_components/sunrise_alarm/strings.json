@@ -45,7 +45,8 @@
         "name": "Status",
         "state": {
           "idle": "Idle",
-          "waking": "Waking"
+          "waking": "Waking",
+          "running": "On"
         }
       }
     },
@@ -67,6 +68,9 @@
     },
     "volume_order": {
       "message": "End volume must be at least the start volume."
+    },
+    "run_shorter_than_ramp": {
+      "message": "The alarm must run at least as long as the ramp time."
     }
   },
   "services": {
@@ -121,12 +125,16 @@
         "ramp_minutes": {
           "name": "Ramp time",
           "description": "Minutes for lights and volume to reach their end levels."
+        },
+        "run_minutes": {
+          "name": "Turn off after",
+          "description": "Minutes after the alarm starts when the music pauses and the lights turn off (5\u2013300, at least the ramp time)."
         }
       }
     },
     "stop": {
       "name": "Stop",
-      "description": "Stop a wake-up in progress and pause the music.",
+      "description": "Stop an alarm in progress and pause the music. Lights stay as they are.",
       "fields": {
         "config_entry_id": {
           "name": "Alarm",

@@ -18,6 +18,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     DEFAULT_SETTINGS,
     DOMAIN,
+    EVENT_FINISHED,
     EVENT_STARTED,
     EVENT_STOPPED,
     SET_BRIGHTNESS,
@@ -25,10 +26,12 @@ from .const import (
     SET_FAVORITE_NAME,
     SET_LIGHTS,
     SET_RAMP,
+    SET_RUN,
     SET_SPEAKER,
     SET_VOLUME_END,
     SET_VOLUME_START,
     STATUS_IDLE,
+    STATUS_RUNNING,
     STATUS_WAKING,
     STEP_SECONDS,
     STORAGE_VERSION,
@@ -77,10 +80,12 @@ class AlarmManager:
         self.status: str = STATUS_IDLE
         self.next_alarm: datetime | None = None
         self.last_started: datetime | None = None
+        self.off_at: datetime | None = None
 
         self._listeners: list[Callable[[], None]] = []
         self._timer: CALLBACK_TYPE | None = None
         self._task: asyncio.Task | None = None
+        self._off_timer: CALLBACK_TYPE | None = None
 
     # ------------------------------------------------------------------
     @property
@@ -108,6 +113,13 @@ class AlarmManager:
                 WEEKDAYS.index(d) for d in stored.get("days", []) if d in WEEKDAYS
             }
             self.enabled = bool(stored.get("enabled", True))
+            if (off_at := stored.get("off_at")) and (
+                parsed := dt_util.parse_datetime(off_at)
+            ):
+                if parsed > dt_util.now():
+                    # Restarted mid-alarm: keep the promise to turn things off
+                    self.status = STATUS_RUNNING
+                    self._arm_off(parsed)
         if stored is not None and "settings" in stored:
             self.settings.update(stored["settings"])
         elif self.entry.options:
@@ -118,6 +130,7 @@ class AlarmManager:
     async def async_unload(self) -> None:
         """Cancel the timer and any ramp in progress."""
         self._cancel_timer()
+        self._cancel_off_timer()
         self._cancel_task()
 
     @callback
@@ -128,6 +141,7 @@ class AlarmManager:
                 "days": self.day_names,
                 "enabled": self.enabled,
                 "settings": self.settings,
+                "off_at": self.off_at.isoformat() if self.off_at else None,
             },
             1,
         )
@@ -241,6 +255,10 @@ class AlarmManager:
         self._cancel_task()
         self.status = STATUS_WAKING
         self.last_started = dt_util.now()
+        ramp = int(self.settings.get(SET_RAMP) or 1)
+        run = max(int(self.settings.get(SET_RUN) or ramp), ramp)
+        self._arm_off(self.last_started + timedelta(minutes=run))
+        self._save()
         self.hass.bus.async_fire(EVENT_STARTED, self._event_data())
         self._task = self.entry.async_create_background_task(
             self.hass, self._run_ramp(), f"{DOMAIN} wake-up ramp"
@@ -284,7 +302,7 @@ class AlarmManager:
         finally:
             if self._task is asyncio.current_task():
                 self._task = None
-                self.status = STATUS_IDLE
+                self.status = STATUS_RUNNING if self.off_at else STATUS_IDLE
                 self._notify()
 
     async def _start_music(self, speaker: str, volume: float) -> None:
@@ -319,10 +337,13 @@ class AlarmManager:
             )
 
     async def async_stop(self) -> None:
-        """Stop a wake-up in progress: pause the music, leave the lights as they are."""
-        if self.status != STATUS_WAKING:
+        """Stop an alarm in progress: pause the music, leave the lights as they are."""
+        if self.status == STATUS_IDLE:
             return
         self._cancel_task()
+        self._cancel_off_timer()
+        self.off_at = None
+        self._save()
         self.status = STATUS_IDLE
         if (speaker := self.settings.get(SET_SPEAKER)) and (
             state := self.hass.states.get(speaker)
@@ -333,6 +354,44 @@ class AlarmManager:
                 )
         self.hass.bus.async_fire(EVENT_STOPPED, self._event_data())
         self._notify()
+
+    # ------------------------------------------------------------------
+    # Auto-off at the end of the run time
+    # ------------------------------------------------------------------
+    @callback
+    def _arm_off(self, when: datetime) -> None:
+        self._cancel_off_timer()
+        self.off_at = when
+        self._off_timer = async_track_point_in_time(self.hass, self._handle_off, when)
+
+    @callback
+    def _cancel_off_timer(self) -> None:
+        if self._off_timer:
+            self._off_timer()
+            self._off_timer = None
+
+    @callback
+    def _handle_off(self, _now: datetime) -> None:
+        self._off_timer = None
+        self.hass.async_create_task(self.async_turn_off())
+
+    async def async_turn_off(self) -> None:
+        """End the alarm: pause the music and turn the lights off."""
+        self._cancel_task()
+        self._cancel_off_timer()
+        self.off_at = None
+        self.status = STATUS_IDLE
+        self._save()
+        self._notify()
+        s = self.settings
+        if (speaker := s.get(SET_SPEAKER)) and (state := self.hass.states.get(speaker)):
+            if state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                await self._call(
+                    "media_player", "media_pause", {ATTR_ENTITY_ID: speaker}
+                )
+        for light in s.get(SET_LIGHTS) or []:
+            await self._call("light", "turn_off", {ATTR_ENTITY_ID: light})
+        self.hass.bus.async_fire(EVENT_FINISHED, self._event_data())
 
     # ------------------------------------------------------------------
     async def _call(self, domain: str, service: str, data: dict[str, Any]) -> None:

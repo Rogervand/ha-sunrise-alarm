@@ -25,6 +25,8 @@ from .const import (
     DOMAIN,
     RAMP_MAX,
     RAMP_MIN,
+    RUN_MAX,
+    RUN_MIN,
     SERVICE_STOP,
     SERVICE_TRIGGER,
     SERVICE_UPDATE,
@@ -33,6 +35,7 @@ from .const import (
     SET_FAVORITE_NAME,
     SET_LIGHTS,
     SET_RAMP,
+    SET_RUN,
     SET_SPEAKER,
     SET_VOLUME_END,
     SET_VOLUME_START,
@@ -77,6 +80,9 @@ UPDATE_SCHEMA = ENTRY_SCHEMA.extend(
         vol.Optional(SET_RAMP): vol.All(
             vol.Coerce(int), vol.Range(min=RAMP_MIN, max=RAMP_MAX)
         ),
+        vol.Optional(SET_RUN): vol.All(
+            vol.Coerce(int), vol.Range(min=RUN_MIN, max=RUN_MAX)
+        ),
     }
 )
 SETTING_KEYS = (
@@ -88,6 +94,7 @@ SETTING_KEYS = (
     SET_LIGHTS,
     SET_BRIGHTNESS,
     SET_RAMP,
+    SET_RUN,
 )
 
 
@@ -121,6 +128,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         if int(merged[SET_VOLUME_END]) < int(merged[SET_VOLUME_START]):
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="volume_order"
+            )
+        if int(merged[SET_RUN]) < int(merged[SET_RAMP]):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="run_shorter_than_ramp"
             )
         if SET_SPEAKER in settings and settings[SET_SPEAKER] is None:
             # No speaker means no music; forget the favorite too

@@ -45,6 +45,7 @@ class NextAlarmSensor(SunriseAlarmEntity, SensorEntity):
             "alarm_time": m.alarm_time.strftime("%H:%M"),
             "enabled": m.enabled,
             "days": m.day_names,
+            "off_at": m.off_at.isoformat() if m.off_at else None,
             "settings": dict(m.settings),
             "config_entry_id": m.entry.entry_id,
             "entities": self._related_entities(),
@@ -67,7 +68,7 @@ class NextAlarmSensor(SunriseAlarmEntity, SensorEntity):
 
 
 class StatusSensor(SunriseAlarmEntity, SensorEntity):
-    """idle or waking."""
+    """idle, waking (ramping up) or running (on until the run time ends)."""
 
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = STATUSES

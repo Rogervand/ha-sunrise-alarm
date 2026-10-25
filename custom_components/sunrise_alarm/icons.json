@@ -21,7 +21,8 @@
         "default": "mdi:alarm",
         "state": {
           "idle": "mdi:alarm",
-          "waking": "mdi:weather-sunset-up"
+          "waking": "mdi:weather-sunset-up",
+          "running": "mdi:alarm-light"
         }
       }
     },

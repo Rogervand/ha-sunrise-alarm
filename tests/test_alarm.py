@@ -48,6 +48,7 @@ def calls(hass: HomeAssistant):
     hass.states.async_set("media_player.bedroom", "paused")
     return {
         "light_on": async_mock_service(hass, "light", "turn_on"),
+        "light_off": async_mock_service(hass, "light", "turn_off"),
         "volume": async_mock_service(hass, "media_player", "volume_set"),
         "play_media": async_mock_service(hass, "media_player", "play_media"),
         "play": async_mock_service(hass, "media_player", "media_play"),
@@ -119,11 +120,11 @@ async def test_wake_ramp_together(hass, freezer, calls, setup_alarm):
     assert 28 <= calls["light_on"][-1].data["brightness_pct"] <= 32
     assert 0.14 <= calls["volume"][-1].data["volume_level"] <= 0.16
 
-    # End of ramp: lights at 60%, volume at 25%, back to idle, music keeps playing
+    # End of ramp: lights at 60%, volume at 25%, still on until the run time ends
     await advance(hass, freezer, timedelta(minutes=5, seconds=5))
     assert calls["light_on"][-1].data["brightness_pct"] == 60
     assert calls["volume"][-1].data["volume_level"] == 0.25
-    assert hass.states.get(STATUS).state == "idle"
+    assert hass.states.get(STATUS).state == "running"
     assert not calls["pause"]
     assert dt_util.parse_datetime(hass.states.get(NEXT).state) == local(2026, 10, 23, 6, 30)
 
@@ -220,3 +221,65 @@ async def test_migrates_v01_alarm(hass, http_stub):
 
 async def test_unload(hass, setup_alarm):
     assert await hass.config_entries.async_unload(setup_alarm.entry_id)
+
+
+async def test_auto_off_after_run_time(hass, freezer, calls, setup_alarm):
+    freezer.move_to(local(2026, 10, 22, 6, 0))
+    await update(
+        hass, setup_alarm, time="06:30", speaker="media_player.bedroom",
+        favorite_id="FV:2/5", lights=["light.bedside"], ramp_minutes=10, run_minutes=30,
+    )
+    finished = []
+    hass.bus.async_listen(f"{DOMAIN}_finished", finished.append)
+    await advance(hass, freezer, timedelta(minutes=30, seconds=5), step=30)
+    a = hass.states.get(NEXT).attributes
+    assert a["status"] == "waking"
+    assert dt_util.parse_datetime(a["off_at"]) == local(2026, 10, 22, 7, 0)
+
+    await advance(hass, freezer, timedelta(minutes=10), step=10)
+    assert hass.states.get(STATUS).state == "running"
+    assert hass.states.get("button.bedroom_stop").state != "unavailable"
+    assert not calls["light_off"] and not calls["pause"]
+
+    # 30 minutes after the alarm time everything turns off
+    await advance(hass, freezer, timedelta(minutes=20), step=30)
+    assert hass.states.get(STATUS).state == "idle"
+    assert calls["light_off"][0].data["entity_id"] == "light.bedside"
+    assert len(calls["pause"]) == 1
+    assert len(finished) == 1
+    assert hass.states.get(NEXT).attributes["off_at"] is None
+
+
+async def test_stop_cancels_auto_off(hass, freezer, calls, setup_alarm):
+    await update(hass, setup_alarm, speaker="media_player.bedroom", lights=["light.bedside"],
+                 ramp_minutes=1, run_minutes=5)
+    await hass.services.async_call(DOMAIN, "trigger", {"config_entry_id": setup_alarm.entry_id}, blocking=True)
+    await advance(hass, freezer, timedelta(minutes=2), step=10)
+    assert hass.states.get(STATUS).state == "running"
+    await hass.services.async_call(DOMAIN, "stop", {"config_entry_id": setup_alarm.entry_id}, blocking=True)
+    assert hass.states.get(STATUS).state == "idle"
+    await advance(hass, freezer, timedelta(minutes=5), step=30)
+    assert not calls["light_off"]  # lights left on after Stop, no later auto-off
+
+
+async def test_run_time_validation(hass, setup_alarm):
+    with pytest.raises(ServiceValidationError):
+        await update(hass, setup_alarm, ramp_minutes=20, run_minutes=10)
+    with pytest.raises(Exception):
+        await update(hass, setup_alarm, run_minutes=4)
+    with pytest.raises(Exception):
+        await update(hass, setup_alarm, run_minutes=301)
+    await update(hass, setup_alarm, ramp_minutes=30, run_minutes=300)
+    assert hass.states.get(NEXT).attributes["settings"]["run_minutes"] == 300
+
+
+async def test_auto_off_survives_restart(hass, freezer, calls, setup_alarm):
+    await update(hass, setup_alarm, lights=["light.bedside"], ramp_minutes=1, run_minutes=20)
+    await hass.services.async_call(DOMAIN, "trigger", {"config_entry_id": setup_alarm.entry_id}, blocking=True)
+    await advance(hass, freezer, timedelta(minutes=2), step=10)
+    assert await hass.config_entries.async_reload(setup_alarm.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(STATUS).state == "running"
+    await advance(hass, freezer, timedelta(minutes=19), step=30)
+    assert hass.states.get(STATUS).state == "idle"
+    assert calls["light_off"]

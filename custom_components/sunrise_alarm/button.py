@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import SunriseAlarmConfigEntry
-from .const import STATUS_WAKING
+from .const import STATUS_IDLE
 from .entity import SunriseAlarmEntity
 
 
@@ -23,12 +23,12 @@ async def async_setup_entry(
 
 
 class StopButton(SunriseAlarmEntity, ButtonEntity):
-    """Stop a wake-up in progress."""
+    """Stop an alarm in progress."""
 
     @property
     def available(self) -> bool:
-        """Only usable while waking."""
-        return self.manager.status == STATUS_WAKING
+        """Only usable while the alarm is going."""
+        return self.manager.status != STATUS_IDLE
 
     async def async_press(self) -> None:
         """Stop."""
