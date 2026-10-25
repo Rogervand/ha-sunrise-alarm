@@ -8,7 +8,7 @@
  * favorite, volume, lights, brightness, ramp time) is set from the card.
  */
 
-const CARD_VERSION = "1.0.1";
+const CARD_VERSION = "1.0.2";
 const DOMAIN = "sunrise_alarm";
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -54,9 +54,10 @@ const STYLE = `
   .brief { display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 4px;
     margin-top: 8px; font-size: 13px; }
   .brief .k { color: var(--secondary-text-color); }
-  .brief .v { color: var(--primary-text-color); min-width: 0;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brief .v { color: var(--primary-text-color); min-width: 0; overflow-wrap: anywhere; }
   .brief .v.none { color: var(--secondary-text-color); }
+  .brief .sub, .chip .sub { color: var(--secondary-text-color); }
+  .brief [hidden] { display: none; }
   .open .brief { display: none; }
   .chev { width: 18px; height: 18px; flex: none; transition: transform 150ms; fill: var(--secondary-text-color); }
   .open .chev { transform: rotate(180deg); }
@@ -168,6 +169,26 @@ class SunriseAlarmCard extends HTMLElement {
       .sort((a, b) => a.title.localeCompare(b.title));
   }
 
+  // Live state of the alarm's devices, as short text ("18% · playing", "45%", "off")
+  _volumeNow(id) {
+    const st = this._hass.states[id];
+    if (!st || st.state === "unavailable" || st.state === "unknown") return "unavailable";
+    if (st.state === "off") return "off";
+    const v = st.attributes.volume_level;
+    if (v == null) return st.state;
+    const pct = `${Math.round(v * 100)}%`;
+    if (st.attributes.is_volume_muted) return `${pct} (muted)`;
+    return ["playing", "paused", "idle"].includes(st.state) ? `${pct} · ${st.state}` : pct;
+  }
+
+  _brightnessNow(id) {
+    const st = this._hass.states[id];
+    if (!st || st.state === "unavailable" || st.state === "unknown") return "unavailable";
+    if (st.state !== "on") return "off";
+    const b = st.attributes.brightness;
+    return b == null ? "on" : `${Math.max(1, Math.round(b / 2.55))}%`;
+  }
+
   _lights() {
     return Object.keys(this._hass.states).filter((id) => id.startsWith("light."))
       .sort((a, b) => this._name(a).localeCompare(this._name(b)));
@@ -217,6 +238,7 @@ class SunriseAlarmCard extends HTMLElement {
           <span class="head"><span class="label">Wake-up settings</span>${CHEVRON}</span>
           <span class="brief">
             <span class="k">Station</span><span class="v" data-brief="station"></span>
+            <span class="k" data-brief-k="volume">Volume</span><span class="v" data-brief="volume"></span>
             <span class="k">Lights</span><span class="v" data-brief="lights"></span>
             <span class="k">Ramp time</span><span class="v" data-brief="ramp"></span>
           </span>
@@ -224,7 +246,8 @@ class SunriseAlarmCard extends HTMLElement {
         <div class="settings">
           <div class="group">
             <h3>Music</h3>
-            <div class="field"><label for="speaker">Sonos speaker</label><select id="speaker"></select></div>
+            <div class="field"><label for="speaker">Sonos speaker</label><select id="speaker"></select>
+              <div class="hint now-volume" hidden></div></div>
             <div class="field"><label for="favorite">Sonos favorite</label><select id="favorite"></select>
               <div class="hint fav-hint" hidden></div></div>
             <div class="field">
@@ -374,18 +397,31 @@ class SunriseAlarmCard extends HTMLElement {
     });
     $(".stop").hidden = !waking;
 
-    // Collapsed summary: one line each for station, lights and ramp time
-    const brief = (key, text) => {
+    // Collapsed summary: station, live volume, lights with live brightness, ramp time
+    const brief = (key, html, plain) => {
       const el = this.shadowRoot.querySelector(`[data-brief="${key}"]`);
-      el.textContent = text || "None";
-      el.classList.toggle("none", !text);
-      el.title = text || "";
+      const out = html || "None";
+      if (el.dataset.sig !== out) { el.innerHTML = out; el.dataset.sig = out; }
+      el.classList.toggle("none", !html);
+      el.title = plain || "";
     };
-    brief("station", s.speaker
-      ? `${s.favorite_name || "Resume playback"} on ${this._name(s.speaker)}` : "");
-    brief("lights", s.lights?.length
-      ? `${s.lights.map((id) => this._name(id)).join(", ")} · ${s.brightness}%` : "");
-    brief("ramp", `${s.ramp_minutes} min`);
+    const station = s.speaker ? `${s.favorite_name || "Resume playback"} on ${this._name(s.speaker)}` : "";
+    brief("station", esc(station), station);
+
+    const showVol = !!s.speaker;
+    this.shadowRoot.querySelector('[data-brief-k="volume"]').hidden = !showVol;
+    this.shadowRoot.querySelector('[data-brief="volume"]').hidden = !showVol;
+    if (showVol) {
+      const now = this._volumeNow(s.speaker);
+      const target = `alarm ${s.volume_start}–${s.volume_end}%`;
+      brief("volume", `${esc(now)} <span class="sub">· ${target}</span>`, `Now ${now} · ${target}`);
+    }
+
+    const lightsNow = (s.lights || []).map((id) => `${this._name(id)} ${this._brightnessNow(id)}`);
+    brief("lights", lightsNow.length
+      ? `${esc(lightsNow.join(", "))} <span class="sub">· alarm ${s.brightness}%</span>` : "",
+      lightsNow.length ? `Now ${lightsNow.join(", ")} · alarm ${s.brightness}%` : "");
+    brief("ramp", `${s.ramp_minutes} min`, `${s.ramp_minutes} min`);
     $(".toggle").setAttribute("aria-expanded", this._open);
 
     if (!this._open) return;
@@ -404,13 +440,16 @@ class SunriseAlarmCard extends HTMLElement {
     const favSel = $("#favorite");
     this._setOptions(favSel, "favorite", favOpts, s.favorite_id);
     favSel.disabled = !s.speaker;
+    const nowVol = $(".now-volume");
+    nowVol.hidden = !s.speaker;
+    if (s.speaker) nowVol.textContent = `Now: ${this._volumeNow(s.speaker)}`;
     const hint = $(".fav-hint");
     hint.hidden = !!favs;
     hint.textContent = "Turn on the \"Sonos favorites\" sensor (Settings → Devices & services → Sonos → entities) to list your favorites.";
 
     // Lights
     const lights = s.lights || [];
-    const chips = lights.map((id) => `<span class="chip">${esc(this._name(id))}<button data-remove="${esc(id)}" aria-label="Remove ${esc(this._name(id))}">×</button></span>`).join("");
+    const chips = lights.map((id) => `<span class="chip">${esc(this._name(id))} <span class="sub">${esc(this._brightnessNow(id))}</span><button data-remove="${esc(id)}" aria-label="Remove ${esc(this._name(id))}">×</button></span>`).join("");
     if ($(".chips").dataset.sig !== chips) { $(".chips").innerHTML = chips; $(".chips").dataset.sig = chips; }
     const avail = this._lights().filter((id) => !lights.includes(id));
     this._setOptions($("#add-light"), "lights", [["", lights.length ? "Add another light…" : "Add a light…"], ...avail.map((id) => [id, this._name(id)])], "");

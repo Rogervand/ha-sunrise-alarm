@@ -23,6 +23,8 @@ Each alarm gets its own dashboard card, so you can put the bedroom alarm on the 
 | Brightness | 50–100%. Lights rise from off to this level over the ramp time. |
 | Ramp time | 1–60 minutes, shared by lights and volume. |
 
+When collapsed, the card lists the station, the speaker's **current volume** (and whether it's playing), each light's **current brightness**, and the ramp time, next to the alarm's target levels. These update live; current levels also appear in the expanded settings.
+
 While an alarm is waking you, the card shows a **Stop** button: it pauses the music and leaves the lights where they are. Once the ramp finishes the alarm is done; the music keeps playing until you stop it in Sonos. **Test now** runs the wake-up immediately.
 
 ## Requirements
